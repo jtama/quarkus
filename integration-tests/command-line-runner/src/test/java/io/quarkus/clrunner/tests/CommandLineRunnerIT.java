@@ -22,10 +22,10 @@ public class CommandLineRunnerIT extends MojoTestBase {
     private File testDir;
 
     @Test
-    public void testCommandLineRunnerIsBuiltProperlyAndExecutesAsExpected()
+    public void testAeshCommandIsBuiltProperlyAndExecutesAsExpected()
             throws MavenInvocationException, IOException, InterruptedException {
         // copy the template
-        testDir = initProject("projects/classic", "projects/project-classic-clir");
+        testDir = initProject("projects/aesh", "projects/project-classic-aesh");
 
         // invoke the build
         running = new RunningInvoker(testDir, false);
@@ -46,7 +46,7 @@ public class CommandLineRunnerIT extends MojoTestBase {
         // launch the jar we just created by passing the file we expect it write and the some input we expect it to capitalize and place in the output
         final Process process = new ProcessBuilder()
                 .directory(runnerJarFile.getParentFile())
-                .command("java", "-jar", runnerJarFile.getAbsolutePath(), expectedOutputFile, "a", "b", "c")
+                .command("java", "-jar", runnerJarFile.getAbsolutePath(), "--file", expectedOutputFile, "a", "b", "c")
                 .start();
 
         // ensure the application completed successfully

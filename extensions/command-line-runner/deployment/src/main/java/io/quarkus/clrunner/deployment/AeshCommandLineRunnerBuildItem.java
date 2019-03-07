@@ -2,11 +2,11 @@ package io.quarkus.clrunner.deployment;
 
 import org.jboss.builder.item.MultiBuildItem;
 
-public final class CommandLineRunnerBuildItem extends MultiBuildItem {
+public final class AeshCommandLineRunnerBuildItem extends MultiBuildItem {
 
     private final String className;
 
-    public CommandLineRunnerBuildItem(String className) {
+    public AeshCommandLineRunnerBuildItem(String className) {
         this.className = className;
     }
 
