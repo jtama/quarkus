@@ -21,6 +21,7 @@ import io.quarkus.resteasy.runtime.JaxRsSecurityConfig;
 import io.quarkus.resteasy.runtime.NotFoundExceptionMapper;
 import io.quarkus.resteasy.runtime.UnauthorizedExceptionMapper;
 import io.quarkus.resteasy.server.common.deployment.ResteasyDeploymentBuildItem;
+import io.quarkus.security.spi.EnableDenyAllBuildItem;
 import io.quarkus.undertow.deployment.StaticResourceFilesBuildItem;
 import io.quarkus.vertx.http.deployment.HttpRootPathBuildItem;
 import io.quarkus.vertx.http.deployment.devmode.NotFoundPageDisplayableEndpointBuildItem;
@@ -32,14 +33,21 @@ public class ResteasyBuiltinsProcessor {
         return new CapabilityBuildItem(Capabilities.RESTEASY);
     }
 
+    /*
+     * The annotation store is not meant to be generally supported for security annotation.
+     * The proper injection point is via AdditionalSecurityCheckBuildItem. We only use annotation store to support
+     * the config.denyJaxRs use case since all the alternatives are worse...
+     */
     @BuildStep
     void setUpDenyAllJaxRs(CombinedIndexBuildItem index,
             JaxRsSecurityConfig config,
             ResteasyDeploymentBuildItem resteasyDeployment,
-            BuildProducer<AnnotationsTransformerBuildItem> transformers) {
+            BuildProducer<AnnotationsTransformerBuildItem> transformers,
+            BuildProducer<EnableDenyAllBuildItem> enableDenyAll) {
         if (config.denyJaxRs) {
             DenyJaxRsTransformer transformer = new DenyJaxRsTransformer(resteasyDeployment.getDeployment());
             transformers.produce(new AnnotationsTransformerBuildItem(transformer));
+            enableDenyAll.produce(new EnableDenyAllBuildItem());
         }
     }
 
