@@ -466,6 +466,7 @@ public final class RunTimeConfigurationGenerator {
                         .getConstructorFor(MethodDescriptor.ofConstructor(configurationClass));
 
                 // specific actions based on config phase
+                String rootName = root.getRootName();
                 if (root.getConfigPhase() == ConfigPhase.BUILD_AND_RUN_TIME_FIXED) {
                     // config root field is final; we initialize it from clinit
                     cc.getFieldCreator(rootFieldDescriptor)
@@ -476,7 +477,9 @@ public final class RunTimeConfigurationGenerator {
                     clinit.writeStaticField(rootFieldDescriptor, instance);
                     instanceCache.put(rootFieldDescriptor, instance);
                     // eager init as appropriate
-                    clinit.invokeVirtualMethod(SB_APPEND_STRING, clinitNameBuilder, clinit.load(root.getRootName()));
+                    if (!rootName.isEmpty()) {
+                        clinit.invokeVirtualMethod(SB_APPEND_STRING, clinitNameBuilder, clinit.load(rootName));
+                    }
                     clinit.invokeStaticMethod(initGroup, clinitConfig, clinitNameBuilder, instance);
                     clinit.invokeVirtualMethod(SB_SET_LENGTH, clinitNameBuilder, clInitOldLen);
                 } else if (root.getConfigPhase() == ConfigPhase.RUN_TIME) {
@@ -487,8 +490,10 @@ public final class RunTimeConfigurationGenerator {
                     final ResultHandle instance = readConfig.invokeStaticMethod(ctor);
                     // assign instance to field
                     readConfig.writeStaticField(rootFieldDescriptor, instance);
-                    readConfig.invokeVirtualMethod(SB_APPEND_STRING, readConfigNameBuilder,
-                            readConfig.load(root.getRootName()));
+                    if (!rootName.isEmpty()) {
+                        readConfig.invokeVirtualMethod(SB_APPEND_STRING, readConfigNameBuilder,
+                                readConfig.load(rootName));
+                    }
                     readConfig.invokeStaticMethod(initGroup, runTimeConfig, readConfigNameBuilder, instance);
                     readConfig.invokeVirtualMethod(SB_SET_LENGTH, readConfigNameBuilder, rcOldLen);
                 } else {
