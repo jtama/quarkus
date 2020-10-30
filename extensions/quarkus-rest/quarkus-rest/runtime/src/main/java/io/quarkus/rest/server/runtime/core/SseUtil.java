@@ -34,6 +34,7 @@ public class SseUtil {
         Buffer data;
         try {
             data = serialiseEvent(context, event);
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Event serialized");
         } catch (IOException e) {
             ret.completeExceptionally(e);
             return ret;
@@ -43,8 +44,12 @@ public class SseUtil {
             @Override
             public void handle(AsyncResult<Void> event) {
                 if (event.failed()) {
+                    System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                            + " - Event failed to be written");
                     ret.completeExceptionally(event.cause());
                 } else {
+                    System.err.println(
+                            Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Event written");
                     ret.complete(null);
                 }
             }

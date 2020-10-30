@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import javax.ws.rs.sse.InboundSseEvent;
 import javax.ws.rs.sse.SseEventSource;
 
+import io.quarkus.rest.common.runtime.util.CommonSseUtil;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClientResponse;
@@ -49,18 +50,18 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
     }
 
     @Override
-    public void register(Consumer<InboundSseEvent> onEvent) {
+    public synchronized void register(Consumer<InboundSseEvent> onEvent) {
         consumers.add(onEvent);
     }
 
     @Override
-    public void register(Consumer<InboundSseEvent> onEvent, Consumer<Throwable> onError) {
+    public synchronized void register(Consumer<InboundSseEvent> onEvent, Consumer<Throwable> onError) {
         consumers.add(onEvent);
         errorListeners.add(onError);
     }
 
     @Override
-    public void register(Consumer<InboundSseEvent> onEvent, Consumer<Throwable> onError, Runnable onComplete) {
+    public synchronized void register(Consumer<InboundSseEvent> onEvent, Consumer<Throwable> onError, Runnable onComplete) {
         consumers.add(onEvent);
         errorListeners.add(onError);
         completionListeners.add(onComplete);
@@ -109,22 +110,28 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
             if (t == ConnectionBase.CLOSED_EXCEPTION) {
                 // we can ignore this one since we registered a closeHandler
             } else {
-                // FIXME: handle real exceptions
-                t.printStackTrace();
+                receiveThrowable(t);
             }
         });
+        // since we registered our exception handler, let's remove the request exception handler
+        // that is set in ClientSendRequestHandler
+        vertxClientResponse.request().exceptionHandler(null);
         connection = vertxClientResponse.request().connection();
         connection.closeHandler(v -> {
             close(true);
         });
+        String sseContentTypeHeader = vertxClientResponse.getHeader(CommonSseUtil.SSE_CONTENT_TYPE);
+        sseParser.setSseContentTypeHeader(sseContentTypeHeader);
         vertxClientResponse.handler(sseParser);
         vertxClientResponse.resume();
         // FIXME: handle end of response rather than wait for end of connection
     }
 
     private void receiveThrowable(Throwable throwable) {
-        // TODO Auto-generated method stub
-
+        throwable.printStackTrace();
+        for (Consumer<Throwable> errorListener : errorListeners) {
+            errorListener.accept(throwable);
+        }
     }
 
     @Override
@@ -139,6 +146,8 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
     }
 
     private synchronized void close(boolean clientClosed) {
+        System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                + " - SSE close clientClosed: " + clientClosed);
         if (!isOpen) {
             return;
         }
@@ -152,6 +161,7 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
         if (!clientClosed) {
             isOpen = false;
         }
+        System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Notify completion");
         // notify completion before reconnecting
         for (Runnable runnable : completionListeners) {
             runnable.run();
@@ -169,14 +179,12 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
         }
     }
 
-    public void fireEvent(QuarkusRestInboundSseEvent event) {
+    public synchronized void fireEvent(QuarkusRestInboundSseEvent event) {
+        System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - fireEvent: " + event);
         // spec says to do this
         if (event.isReconnectDelaySet()) {
-            // this needs to be atomic
-            synchronized (this) {
-                reconnectDelay = event.getReconnectDelay();
-                reconnectUnit = TimeUnit.MILLISECONDS;
-            }
+            reconnectDelay = event.getReconnectDelay();
+            reconnectUnit = TimeUnit.MILLISECONDS;
         }
         for (Consumer<InboundSseEvent> consumer : consumers) {
             consumer.accept(event);
@@ -193,6 +201,7 @@ public class QuarkusRestSseEventSource implements SseEventSource, Handler<Long> 
         if (!isOpen) {
             return;
         }
+        System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - SSE RECONNECT");
         connect();
     }
 

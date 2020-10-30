@@ -18,11 +18,11 @@ import javax.ws.rs.sse.SseEventSource;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.jaxrs.client.runtime.QuarkusRestMultiInvoker;
+import io.quarkus.rest.common.runtime.util.QuarkusRestUtil;
 import io.quarkus.test.QuarkusUnitTest;
 import io.quarkus.test.common.http.TestHTTPResource;
 import io.smallrye.mutiny.Multi;
@@ -35,43 +35,118 @@ public class SseTestCase {
     @RegisterExtension
     static final QuarkusUnitTest config = new QuarkusUnitTest()
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
-                    .addClasses(SseResource.class));
+                    .addClasses(SseResource.class, Message.class));
 
     @Test
-    public void testSse() throws Exception {
+    public void testSseFromSse() throws Exception {
+        System.err.println("testSseFromSse start");
+        try {
+            testSse("sse");
+        } finally {
+            System.err.println("testSseFromSse end");
+        }
+    }
 
+    @Test
+    public void testSseFromMulti() throws Exception {
+        System.err
+                .println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - testSseFromMulti start");
+        try {
+            testSse("sse/multi");
+        } catch (Throwable t) {
+            t.printStackTrace();
+            throw QuarkusRestUtil.sneakyThrow(t);
+        } finally {
+            System.err.println(
+                    Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - testSseFromMulti end");
+        }
+    }
+
+    private void testSse(String path) throws Exception {
         Client client = ClientBuilder.newBuilder().build();
-        WebTarget target = client.target(uri.toString() + "sse");
-        try (SseEventSource eventSource = SseEventSource.target(target).build()) {
+        WebTarget target = client.target(uri.toString() + path);
+        // do not reconnect
+        try (SseEventSource eventSource = SseEventSource.target(target).reconnectingEvery(Integer.MAX_VALUE, TimeUnit.SECONDS)
+                .build()) {
             CompletableFuture<List<String>> res = new CompletableFuture<>();
             List<String> collect = new ArrayList<>();
             eventSource.register(new Consumer<InboundSseEvent>() {
                 @Override
                 public void accept(InboundSseEvent inboundSseEvent) {
+                    //                    System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Accept: "
+                    //                            + inboundSseEvent);
                     collect.add(inboundSseEvent.readData());
+                    System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Accept: "
+                            + inboundSseEvent + " done");
                 }
             }, new Consumer<Throwable>() {
                 @Override
                 public void accept(Throwable throwable) {
+                    System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                            + " - Got exception: " + throwable);
+                    throwable.printStackTrace();
                     res.completeExceptionally(throwable);
                 }
-            }, () -> {
-                res.complete(collect);
+            }, new Runnable() {
+                @Override
+                public void run() {
+                    System.err.println(
+                            Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Got complete");
+                    try {
+                        res.complete(collect);
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                        throw QuarkusRestUtil.sneakyThrow(t);
+                    }
+                }
             });
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Open");
             eventSource.open();
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Waiting");
             Assertions.assertEquals(Arrays.asList("hello", "stef"), res.get(5, TimeUnit.SECONDS));
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId() + " - Waiting done");
         }
     }
 
-    @Disabled("This is too unstable at the moment")
+    //    @Disabled("This is too unstable at the moment")
     @Test
-    public void testSseMulti() throws Exception {
+    public void testMultiFromSse() throws Exception {
+        testMulti("sse");
+    }
+
+    @Test
+    public void testMultiFromMulti() throws Exception {
+        testMulti("sse/multi");
+    }
+
+    private void testMulti(String path) {
         Client client = ClientBuilder.newBuilder().build();
-        WebTarget target = client.target(uri.toString() + "sse/multi");
+        WebTarget target = client.target(uri.toString() + path);
         Multi<String> multi = target.request().rx(QuarkusRestMultiInvoker.class).get(String.class);
         List<String> list = multi.collectItems().asList().await().atMost(Duration.ofSeconds(30));
         Assertions.assertEquals(2, list.size());
         Assertions.assertEquals("hello", list.get(0));
         Assertions.assertEquals("stef", list.get(1));
+    }
+
+    @Test
+    public void testJsonMultiFromSse() throws Exception {
+        testJsonMulti("sse/json");
+        testJsonMulti("sse/json2");
+    }
+
+    @Test
+    public void testJsonMultiFromMulti() throws Exception {
+        testJsonMulti("sse/json/multi");
+    }
+
+    private void testJsonMulti(String path) {
+        Client client = ClientBuilder.newBuilder().build();
+        WebTarget target = client.target(uri.toString() + path);
+        Multi<Message> multi = target.request().rx(QuarkusRestMultiInvoker.class).get(Message.class);
+        List<Message> list = multi.collectItems().asList().await().atMost(Duration.ofSeconds(30));
+        Assertions.assertEquals(2, list.size());
+        Assertions.assertEquals("hello", list.get(0).name);
+        Assertions.assertEquals("stef", list.get(1).name);
     }
 }

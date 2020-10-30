@@ -23,9 +23,16 @@ public class MultiResponseHandler implements ServerRestHandler {
 
         @Override
         public void onNext(Object item) {
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onNext: " + item);
             OutboundSseEvent event = new QuarkusRestOutboundSseEvent.BuilderImpl().data(item).build();
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler calling send");
             SseUtil.send(requestContext, event).handle((v, t) -> {
+                System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                        + " Multi response handler handle t = " + t);
                 if (t != null) {
+                    t.printStackTrace();
                     // need to cancel because the exception didn't come from the Multi
                     subscription.cancel();
                     handleException(requestContext, t);
@@ -35,6 +42,8 @@ public class MultiResponseHandler implements ServerRestHandler {
                 }
                 return null;
             });
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler calling send DONE");
         }
     }
 
@@ -71,30 +80,45 @@ public class MultiResponseHandler implements ServerRestHandler {
         AbstractMultiSubscriber(QuarkusRestRequestContext requestContext) {
             this.requestContext = requestContext;
             // let's make sure we never restart by accident, also make sure we're not marked as completed
-            requestContext.restart(AWOL);
+            requestContext.restart(AWOL, true);
         }
 
         @Override
         public void onSubscribe(Subscription s) {
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onSubscribe");
             this.subscription = s;
             // initially ask for one item
             s.request(1);
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onSubscribe DONE");
         }
 
         @Override
         public void onComplete() {
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onComplete");
             // no need to cancel on complete
             // FIXME: are we interested in async completion?
             requestContext.getContext().response().end();
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onComplete 2");
             // so, if I don't also close the connection, the client isn't notified that the request is over
             // I guess that's true of chunked responses, but not clear why I need to close the connection
             // because it means it can't get reused, right?
             requestContext.getContext().response().close();
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onComplete 3");
             requestContext.close();
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onComplete 4");
         }
 
         @Override
         public void onError(Throwable t) {
+            System.err.println(Thread.currentThread().getName() + "#" + Thread.currentThread().getId()
+                    + " Multi response handler onError t = " + t);
+            t.printStackTrace();
             // no need to cancel on error
             handleException(requestContext, t);
         }
