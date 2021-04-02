@@ -7,7 +7,7 @@ import io.quarkus.runtime.annotations.ConfigRoot;
 /**
  * @author Michal Szynkiewicz, michal.l.szynkiewicz@gmail.com
  */
-@ConfigRoot(name = "security.jaxrs", phase = ConfigPhase.BUILD_AND_RUN_TIME_FIXED)
+@ConfigRoot(name = "security.jaxrs.reactive", phase = ConfigPhase.BUILD_AND_RUN_TIME_FIXED)
 public class JaxRsSecurityConfig {
     /**
      * if set to true, access to all JAX-RS resources will be denied by default
