@@ -4,21 +4,34 @@ import java.util.Collections;
 import java.util.Optional;
 
 import javax.inject.Inject;
+import javax.persistence.EntityManager;
 import javax.persistence.LockModeType;
 import javax.ws.rs.WebApplicationException;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import io.quarkus.hibernate.orm.panache.PanacheRepositoryBase;
 import io.quarkus.panache.mock.PanacheMock;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.mockito.InjectMock;
 
 @QuarkusTest
 public class PanacheMockingTest {
+
+    @Inject
+    EntityManager em;
+
+    @BeforeAll
+    public static void setup() {
+        EntityManager mock = Mockito.mock(EntityManager.class);
+        Mockito.doNothing().when(mock).persist(Mockito.any());
+        QuarkusMock.installMockForType(mock, EntityManager.class);
+    }
 
     @Test
     @Order(1)
@@ -79,6 +92,9 @@ public class PanacheMockingTest {
 
         Person.persist(p);
         Assertions.assertNull(p.id);
+        // mocked via EntityManager mocking
+        p.persist();
+        Assertions.assertNull(p.id);
 
         Mockito.when(Person.findById(12l)).thenThrow(new WebApplicationException());
         try {
@@ -95,6 +111,8 @@ public class PanacheMockingTest {
         PanacheMock.verify(Person.class).persist(Mockito.<Object> any(), Mockito.<Object> any());
         PanacheMock.verify(Person.class, Mockito.atLeastOnce()).findById(Mockito.any());
         PanacheMock.verifyNoMoreInteractions(Person.class);
+        Mockito.verify(em).persist(Mockito.any());
+        Mockito.verifyNoInteractions(em);
 
         Assertions.assertEquals(0, Person.methodWithPrimitiveParams(true, (byte) 0, (short) 0, 0, 2, 2.0f, 2.0, 'c'));
     }
