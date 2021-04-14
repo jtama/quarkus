@@ -4,10 +4,10 @@ import java.util.Collections;
 import java.util.Optional;
 
 import javax.inject.Inject;
-import javax.persistence.EntityManager;
 import javax.persistence.LockModeType;
 import javax.ws.rs.WebApplicationException;
 
+import org.hibernate.Session;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Order;
@@ -24,13 +24,13 @@ import io.quarkus.test.junit.mockito.InjectMock;
 public class PanacheMockingTest {
 
     @Inject
-    EntityManager em;
+    Session session;
 
     @BeforeAll
     public static void setup() {
-        EntityManager mock = Mockito.mock(EntityManager.class);
+        Session mock = Mockito.mock(Session.class);
         Mockito.doNothing().when(mock).persist(Mockito.any());
-        QuarkusMock.installMockForType(mock, EntityManager.class);
+        QuarkusMock.installMockForType(mock, Session.class);
     }
 
     @Test
@@ -111,8 +111,8 @@ public class PanacheMockingTest {
         PanacheMock.verify(Person.class).persist(Mockito.<Object> any(), Mockito.<Object> any());
         PanacheMock.verify(Person.class, Mockito.atLeastOnce()).findById(Mockito.any());
         PanacheMock.verifyNoMoreInteractions(Person.class);
-        Mockito.verify(em).persist(Mockito.any());
-        Mockito.verifyNoInteractions(em);
+        Mockito.verify(session).persist(Mockito.any());
+        Mockito.verifyNoInteractions(session);
 
         Assertions.assertEquals(0, Person.methodWithPrimitiveParams(true, (byte) 0, (short) 0, 0, 2, 2.0f, 2.0, 'c'));
     }
