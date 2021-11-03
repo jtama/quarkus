@@ -17,7 +17,13 @@ public class NarayanaLRARecorder {
 
     static LRAParticipantRegistry registry;
 
-    public void setConfig(final LRAConfiguration config) {
+    private final LRAConfiguration config;
+
+    public NarayanaLRARecorder(LRAConfiguration config) {
+        this.config = config;
+    }
+
+    public void populateConfig() {
         if (System.getProperty(NarayanaLRAClient.LRA_COORDINATOR_URL_KEY) == null) {
             System.setProperty(NarayanaLRAClient.LRA_COORDINATOR_URL_KEY, config.coordinatorURL);
         }

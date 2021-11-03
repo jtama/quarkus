@@ -25,7 +25,6 @@ import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
-import io.quarkus.narayana.lra.runtime.LRAConfiguration;
 import io.quarkus.narayana.lra.runtime.NarayanaLRAProducers;
 import io.quarkus.narayana.lra.runtime.NarayanaLRARecorder;
 import io.quarkus.resteasy.common.spi.ResteasyDotNames;
@@ -39,10 +38,8 @@ class NarayanaLRAProcessor {
 
     @BuildStep
     @Record(RUNTIME_INIT)
-    public void build(NarayanaLRARecorder recorder,
-            LRAConfiguration configuration) {
-
-        recorder.setConfig(configuration);
+    public void build(NarayanaLRARecorder recorder) {
+        recorder.populateConfig();
     }
 
     @BuildStep()
