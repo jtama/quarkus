@@ -36,6 +36,7 @@ import org.jboss.logmanager.handlers.FileHandler;
 import org.jboss.logmanager.handlers.PeriodicRotatingFileHandler;
 import org.jboss.logmanager.handlers.PeriodicSizeRotatingFileHandler;
 import org.jboss.logmanager.handlers.SizeRotatingFileHandler;
+import org.jboss.logmanager.handlers.SocketHandler;
 import org.jboss.logmanager.handlers.SyslogHandler;
 
 import io.quarkus.bootstrap.logging.InitialConfigurator;
@@ -157,6 +158,13 @@ public class LoggingSetupRecorder {
             final Handler syslogHandler = configureSyslogHandler(config.syslog, errorManager, cleanupFiler);
             if (syslogHandler != null) {
                 handlers.add(syslogHandler);
+            }
+        }
+
+        if (config.socket.enable) {
+            final Handler socketHandler = configureSocketHandler(config.socket, errorManager, cleanupFiler);
+            if (socketHandler != null) {
+                handlers.add(socketHandler);
             }
         }
 
@@ -348,6 +356,16 @@ public class LoggingSetupRecorder {
                 addToNamedHandlers(namedHandlers, syslogHandler, sysLogConfigEntry.getKey());
             }
         }
+        for (Entry<String, SocketConfig> socketConfigEntry : config.socketHandlers.entrySet()) {
+            SocketConfig namedSocketConfig = socketConfigEntry.getValue();
+            if (!namedSocketConfig.enable) {
+                continue;
+            }
+            final Handler syslogHandler = configureSocketHandler(namedSocketConfig, errorManager, cleanupFilter);
+            if (syslogHandler != null) {
+                addToNamedHandlers(namedHandlers, syslogHandler, socketConfigEntry.getKey());
+            }
+        }
         return namedHandlers;
     }
 
@@ -531,6 +549,28 @@ public class LoggingSetupRecorder {
             handler.setBlockOnReconnect(config.blockOnReconnect);
             handler.setTruncate(config.truncate);
             handler.setUseCountingFraming(config.useCountingFraming);
+            handler.setLevel(config.level);
+            final PatternFormatter formatter = new PatternFormatter(config.format);
+            handler.setFormatter(formatter);
+            handler.setErrorManager(errorManager);
+            handler.setFilter(logCleanupFilter);
+            if (config.async.enable) {
+                return createAsyncHandler(config.async, config.level, handler);
+            }
+            return handler;
+        } catch (IOException e) {
+            errorManager.error("Failed to create syslog handler", e, ErrorManager.OPEN_FAILURE);
+            return null;
+        }
+    }
+
+    private static Handler configureSocketHandler(final SocketConfig config,
+            final ErrorManager errorManager,
+            final LogCleanupFilter logCleanupFilter) {
+        try {
+            final SocketHandler handler = new SocketHandler(config.endpoint.getHostString(), config.endpoint.getPort());
+            handler.setProtocol(config.protocol);
+            handler.setBlockOnReconnect(config.blockOnReconnect);
             handler.setLevel(config.level);
             final PatternFormatter formatter = new PatternFormatter(config.format);
             handler.setFormatter(formatter);
