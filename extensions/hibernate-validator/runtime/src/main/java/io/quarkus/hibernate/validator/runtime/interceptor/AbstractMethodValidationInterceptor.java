@@ -5,6 +5,7 @@ import java.lang.reflect.Member;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
@@ -15,6 +16,8 @@ import javax.validation.ElementKind;
 import javax.validation.Path;
 import javax.validation.Validator;
 import javax.validation.executable.ExecutableValidator;
+
+import io.smallrye.mutiny.Uni;
 
 /**
  * NOTE: this is a copy of the interceptor present in hibernate-validator-cdi.
@@ -58,7 +61,6 @@ public abstract class AbstractMethodValidationInterceptor implements Serializabl
      *         return value validation.
      */
     protected Object validateMethodInvocation(InvocationContext ctx) throws Exception {
-
         ExecutableValidator executableValidator = validatorInstance.get().forExecutables();
         Set<ConstraintViolation<Object>> violations = executableValidator.validateParameters(ctx.getTarget(),
                 ctx.getMethod(), ctx.getParameters());
@@ -70,11 +72,25 @@ public abstract class AbstractMethodValidationInterceptor implements Serializabl
 
         Object result = ctx.proceed();
 
-        violations = executableValidator.validateReturnValue(ctx.getTarget(), ctx.getMethod(), result);
-
-        if (!violations.isEmpty()) {
-            throw new ConstraintViolationException(getMessage(ctx.getMethod(), ctx.getParameters(), violations),
-                    violations);
+        if (result instanceof Uni) {
+            Uni<?> uni = (Uni<?>) result;
+            return uni.onItem().invoke(new Consumer<Object>() {
+                @Override
+                public void accept(Object o) {
+                    // TODO: here I need to tell HV to use o.getClass() as the type, instead of Uni
+                    var uniValueViolations = executableValidator.validateReturnValue(ctx.getTarget(), ctx.getMethod(), o);
+                    if (!uniValueViolations.isEmpty()) {
+                        throw new ConstraintViolationException(getMessage(ctx.getMethod(), ctx.getParameters(),
+                                uniValueViolations), uniValueViolations);
+                    }
+                }
+            });
+        } else {
+            violations = executableValidator.validateReturnValue(ctx.getTarget(), ctx.getMethod(), result);
+            if (!violations.isEmpty()) {
+                throw new ConstraintViolationException(getMessage(ctx.getMethod(), ctx.getParameters(), violations),
+                        violations);
+            }
         }
 
         return result;
