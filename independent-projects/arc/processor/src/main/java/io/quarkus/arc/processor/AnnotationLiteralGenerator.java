@@ -5,6 +5,7 @@ import static org.objectweb.asm.Opcodes.ACC_PRIVATE;
 import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
 import static org.objectweb.asm.Opcodes.ACC_STATIC;
 
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -19,6 +20,7 @@ import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 import org.jboss.logging.Logger;
 
+import io.quarkus.arc.AbstractAnnotationLiteral;
 import io.quarkus.arc.impl.ComputingCache;
 import io.quarkus.arc.processor.AnnotationLiteralProcessor.AnnotationLiteralClassInfo;
 import io.quarkus.arc.processor.AnnotationLiteralProcessor.CacheKey;
@@ -109,13 +111,14 @@ public class AnnotationLiteralGenerator extends AbstractGenerator {
         ClassCreator annotationLiteral = ClassCreator.builder()
                 .classOutput(classOutput)
                 .className(generatedName)
+                .superClass(AbstractAnnotationLiteral.class)
                 .interfaces(literal.annotationName().toString())
                 .build();
 
         MethodCreator constructor = annotationLiteral.getMethodCreator(Methods.INIT, "V",
                 literal.annotationMembers().stream().map(m -> m.returnType().name().toString()).toArray());
 
-        constructor.invokeSpecialMethod(MethodDescriptor.ofConstructor(Object.class), constructor.getThis());
+        constructor.invokeSpecialMethod(MethodDescriptor.ofConstructor(AbstractAnnotationLiteral.class), constructor.getThis());
 
         int constructorParameterIndex = 0;
         for (MethodInfo annotationMember : literal.annotationMembers()) {
@@ -159,6 +162,19 @@ public class AnnotationLiteralGenerator extends AbstractGenerator {
         generateEquals(annotationLiteral, literal);
         generateHashCode(annotationLiteral, literal);
         generateToString(annotationLiteral, literal);
+
+        MethodCreator isInstanceOf = annotationLiteral.getMethodCreator("isInstanceOf", boolean.class, Class.class);
+        ResultHandle classToCheck = isInstanceOf.getMethodParam(0);
+        isInstanceOf.ifReferencesEqual(classToCheck, isInstanceOf.loadClass(literal.annotationClass))
+                .trueBranch().returnBoolean(true);
+        // TODO we probably don't need the following
+        isInstanceOf.ifReferencesEqual(classToCheck, isInstanceOf.loadClass(Annotation.class))
+                .trueBranch().returnBoolean(true);
+        isInstanceOf.ifReferencesEqual(classToCheck, isInstanceOf.loadClass(AbstractAnnotationLiteral.class))
+                .trueBranch().returnBoolean(true);
+        isInstanceOf.ifReferencesEqual(classToCheck, isInstanceOf.loadClass(Object.class))
+                .trueBranch().returnBoolean(true);
+        isInstanceOf.returnBoolean(false);
 
         annotationLiteral.close();
         LOGGER.debugf("Annotation literal class generated: %s", literal.generatedClassName);
