@@ -2,32 +2,24 @@ package io.quarkus.csrf.reactive.runtime;
 
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.function.Consumer;
-import java.util.function.Function;
 
-import javax.enterprise.inject.Instance;
-import javax.inject.Inject;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 import org.jboss.resteasy.reactive.server.ServerResponseFilter;
+import org.jboss.resteasy.reactive.server.core.ResteasyReactiveRequestContext;
+import org.jboss.resteasy.reactive.server.spi.ServerRestHandler;
 
-import io.smallrye.mutiny.Uni;
-import io.smallrye.mutiny.subscription.UniEmitter;
-import io.vertx.core.Handler;
-import io.vertx.core.MultiMap;
 import io.vertx.core.http.Cookie;
-import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.impl.CookieImpl;
 import io.vertx.core.http.impl.ServerCookie;
 import io.vertx.ext.web.RoutingContext;
 
-public class CsrfRequestResponseReactiveFilter {
-    private static final Logger LOG = Logger.getLogger(CsrfRequestResponseReactiveFilter.class);
+public class CsrfHandler implements ServerRestHandler {
+    private static final Logger LOG = Logger.getLogger(CsrfHandler.class);
 
     /**
      * CSRF token key.
@@ -42,10 +34,9 @@ public class CsrfRequestResponseReactiveFilter {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
-    @Inject
-    Instance<CsrfReactiveConfig> configInstance;
+    CsrfReactiveConfig config;
 
-    public CsrfRequestResponseReactiveFilter() {
+    public CsrfHandler() {
     }
 
     /**
@@ -63,9 +54,10 @@ public class CsrfRequestResponseReactiveFilter {
      * {@value #CSRF_TOKEN_KEY} and value that is equal to the one supplied in the cookie.</li>
      * </ul>
      */
-    @ServerRequestFilter(preMatching = true)
-    public Uni<Response> filter(ContainerRequestContext requestContext, RoutingContext routing) {
-        final CsrfReactiveConfig config = this.configInstance.get();
+    public void handle(ResteasyReactiveRequestContext reactiveRequestContext) {
+        final ContainerRequestContext requestContext = reactiveRequestContext.getContainerRequestContext();
+
+        final RoutingContext routing = reactiveRequestContext.serverRequest().unwrap(RoutingContext.class);
 
         String cookieToken = getCookieToken(routing, config);
         if (cookieToken != null) {
@@ -78,11 +70,13 @@ public class CsrfRequestResponseReactiveFilter {
                 if (cookieTokenSize != expectedCookieTokenSize) {
                     LOG.debugf("Invalid CSRF token cookie size: expected %d, got %d", expectedCookieTokenSize,
                             cookieTokenSize);
-                    return Uni.createFrom().item(badClientRequest());
+                    requestContext.abortWith(badClientRequest());
+                    return;
                 }
             } catch (IllegalArgumentException e) {
                 LOG.debugf("Invalid CSRF token cookie: %s", cookieToken);
-                return Uni.createFrom().item(badClientRequest());
+                requestContext.abortWith(badClientRequest());
+                return;
             }
         }
 
@@ -102,53 +96,50 @@ public class CsrfRequestResponseReactiveFilter {
                     && !isMatchingMediaType(requestContext.getMediaType(), MediaType.MULTIPART_FORM_DATA_TYPE)) {
                 if (config.requireFormUrlEncoded) {
                     LOG.debugf("Request has the wrong media type: %s", requestContext.getMediaType().toString());
-                    return Uni.createFrom().item(badClientRequest());
+                    requestContext.abortWith(badClientRequest());
+                    return;
                 } else {
                     LOG.debugf("Request has the  media type: %s, skipping the token verification",
                             requestContext.getMediaType().toString());
-                    return Uni.createFrom().nullItem();
+                    requestContext.abortWith(badClientRequest());
+                    return;
                 }
             }
 
             if (!requestContext.hasEntity()) {
                 LOG.debug("Request has no entity");
-                return Uni.createFrom().item(badClientRequest());
+                requestContext.abortWith(badClientRequest());
+                return;
             }
 
             if (cookieToken == null) {
                 LOG.debug("CSRF cookie is not found");
-                return Uni.createFrom().item(badClientRequest());
+                requestContext.abortWith(badClientRequest());
+                return;
             }
 
-            return getFormUrlEncodedData(routing.request())
-                    .flatMap(new Function<MultiMap, Uni<? extends Response>>() {
-                        @Override
-                        public Uni<Response> apply(MultiMap form) {
+            String csrfToken = (String) reactiveRequestContext.getFormParameter(config.formFieldName, true, true);
 
-                            String csrfToken = form.get(config.formFieldName);
-                            if (csrfToken == null) {
-                                LOG.debug("CSRF token is not found");
-                                return Uni.createFrom().item(badClientRequest());
-                            } else {
-                                String expectedCookieTokenValue = config.tokenSignatureKey.isPresent()
-                                        ? CsrfTokenUtils.signCsrfToken(csrfToken, config.tokenSignatureKey.get())
-                                        : csrfToken;
-                                if (!cookieToken.equals(expectedCookieTokenValue)) {
-                                    LOG.debug("CSRF token value is wrong");
-                                    return Uni.createFrom().item(badClientRequest());
-                                } else {
-                                    routing.put(CSRF_TOKEN_VERIFIED, true);
-                                    return Uni.createFrom().nullItem();
-                                }
-                            }
-                        }
-                    });
+            if (csrfToken == null) {
+                LOG.debug("CSRF token is not found");
+                requestContext.abortWith(badClientRequest());
+                return;
+            } else {
+                String expectedCookieTokenValue = config.tokenSignatureKey.isPresent()
+                        ? CsrfTokenUtils.signCsrfToken(csrfToken, config.tokenSignatureKey.get())
+                        : csrfToken;
+                if (!cookieToken.equals(expectedCookieTokenValue)) {
+                    LOG.debug("CSRF token value is wrong");
+                    requestContext.abortWith(badClientRequest());
+                    return;
+                } else {
+                    routing.put(CSRF_TOKEN_VERIFIED, true);
+                }
+            }
         } else if (cookieToken == null) {
             LOG.debug("CSRF token is not found");
-            return Uni.createFrom().item(badClientRequest());
+            requestContext.abortWith(badClientRequest());
         }
-
-        return null;
     }
 
     private static boolean isMatchingMediaType(MediaType contentType, MediaType expectedType) {
@@ -173,7 +164,6 @@ public class CsrfRequestResponseReactiveFilter {
     @ServerResponseFilter
     public void filter(ContainerRequestContext requestContext,
             ContainerResponseContext responseContext, RoutingContext routing) {
-        final CsrfReactiveConfig config = configInstance.get();
         if (requestContext.getMethod().equals("GET") && isCsrfTokenRequired(routing, config)
                 && getCookieToken(routing, config) == null) {
 
@@ -245,20 +235,8 @@ public class CsrfRequestResponseReactiveFilter {
         }
     }
 
-    private static Uni<MultiMap> getFormUrlEncodedData(HttpServerRequest request) {
-        request.setExpectMultipart(true);
-        return Uni.createFrom().emitter(new Consumer<UniEmitter<? super MultiMap>>() {
-            @Override
-            public void accept(UniEmitter<? super MultiMap> t) {
-                request.endHandler(new Handler<Void>() {
-                    @Override
-                    public void handle(Void event) {
-                        t.complete(request.formAttributes());
-                    }
-                });
-                request.resume();
-            }
-        });
+    public void configure(CsrfReactiveConfig configuration) {
+        this.config = configuration;
     }
 
 }
