@@ -11,6 +11,8 @@ import javax.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerResponseFilter;
 import org.jboss.resteasy.reactive.server.core.ResteasyReactiveRequestContext;
+import org.jboss.resteasy.reactive.server.spi.RuntimeConfigurableServerRestHandler;
+import org.jboss.resteasy.reactive.server.spi.RuntimeConfiguration;
 import org.jboss.resteasy.reactive.server.spi.ServerRestHandler;
 
 import io.vertx.core.http.Cookie;
@@ -18,7 +20,7 @@ import io.vertx.core.http.impl.CookieImpl;
 import io.vertx.core.http.impl.ServerCookie;
 import io.vertx.ext.web.RoutingContext;
 
-public class CsrfHandler implements ServerRestHandler {
+public class CsrfHandler implements ServerRestHandler, RuntimeConfigurableServerRestHandler {
     private static final Logger LOG = Logger.getLogger(CsrfHandler.class);
 
     /**
@@ -237,6 +239,12 @@ public class CsrfHandler implements ServerRestHandler {
 
     public void configure(CsrfReactiveConfig configuration) {
         this.config = configuration;
+    }
+
+    @Override
+    public void configure(RuntimeConfiguration configuration) {
+        // TODO Auto-generated method stub
+
     }
 
 }

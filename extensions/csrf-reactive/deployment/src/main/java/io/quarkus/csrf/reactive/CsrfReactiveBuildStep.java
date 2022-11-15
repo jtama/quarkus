@@ -3,6 +3,7 @@ package io.quarkus.csrf.reactive;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 import org.jboss.jandex.ClassInfo;
@@ -13,12 +14,17 @@ import org.jboss.resteasy.reactive.server.processor.scanning.MethodScanner;
 
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.csrf.reactive.runtime.CsrfHandler;
+import io.quarkus.csrf.reactive.runtime.CsrfReactiveConfig;
+import io.quarkus.csrf.reactive.runtime.CsrfRecorder;
 import io.quarkus.csrf.reactive.runtime.CsrfTokenParameterProvider;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.BuildSteps;
+import io.quarkus.deployment.annotations.ExecutionTime;
+import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.AdditionalIndexedClassesBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
+import io.quarkus.resteasy.reactive.server.deployment.ResteasyReactiveDeploymentBuildItem;
 import io.quarkus.resteasy.reactive.server.spi.MethodScannerBuildItem;
 
 @BuildSteps(onlyIf = CsrfReactiveBuildStep.IsEnabled.class)
@@ -47,6 +53,17 @@ public class CsrfReactiveBuildStep {
                                 HandlerChainCustomizer.Phase.AFTER_MATCH));
             }
         });
+    }
+
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
+    public void applyRuntimeConfig(CsrfRecorder recorder,
+            Optional<ResteasyReactiveDeploymentBuildItem> deployment,
+            CsrfReactiveConfig csrfReactiveConfig) {
+        if (!deployment.isPresent()) {
+            return;
+        }
+        recorder.configure(deployment.get().getDeployment(), csrfReactiveConfig);
     }
 
     public static class IsEnabled implements BooleanSupplier {
