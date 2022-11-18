@@ -3,7 +3,6 @@ package io.quarkus.csrf.reactive;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.BooleanSupplier;
 
 import org.jboss.jandex.ClassInfo;
@@ -24,7 +23,7 @@ import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.AdditionalIndexedClassesBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
-import io.quarkus.resteasy.reactive.server.deployment.ResteasyReactiveDeploymentBuildItem;
+import io.quarkus.resteasy.reactive.server.spi.HandlerConfigurationProviderBuildItem;
 import io.quarkus.resteasy.reactive.server.spi.MethodScannerBuildItem;
 
 @BuildSteps(onlyIf = CsrfReactiveBuildStep.IsEnabled.class)
@@ -34,11 +33,7 @@ public class CsrfReactiveBuildStep {
     void registerProvider(BuildProducer<AdditionalBeanBuildItem> additionalBeans,
             BuildProducer<ReflectiveClassBuildItem> reflectiveClass,
             BuildProducer<AdditionalIndexedClassesBuildItem> additionalIndexedClassesBuildItem) {
-        additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(CsrfHandler.class));
-        reflectiveClass.produce(new ReflectiveClassBuildItem(true, true, CsrfHandler.class));
         additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(CsrfTokenParameterProvider.class));
-        additionalIndexedClassesBuildItem
-                .produce(new AdditionalIndexedClassesBuildItem(CsrfHandler.class.getName()));
     }
 
     @BuildStep
@@ -57,13 +52,9 @@ public class CsrfReactiveBuildStep {
 
     @BuildStep
     @Record(ExecutionTime.RUNTIME_INIT)
-    public void applyRuntimeConfig(CsrfRecorder recorder,
-            Optional<ResteasyReactiveDeploymentBuildItem> deployment,
+    public HandlerConfigurationProviderBuildItem applyRuntimeConfig(CsrfRecorder recorder,
             CsrfReactiveConfig csrfReactiveConfig) {
-        if (!deployment.isPresent()) {
-            return;
-        }
-        recorder.configure(deployment.get().getDeployment(), csrfReactiveConfig);
+        return new HandlerConfigurationProviderBuildItem(CsrfReactiveConfig.class, recorder.configure(csrfReactiveConfig));
     }
 
     public static class IsEnabled implements BooleanSupplier {

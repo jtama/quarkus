@@ -9,18 +9,15 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.server.ServerResponseFilter;
 import org.jboss.resteasy.reactive.server.core.ResteasyReactiveRequestContext;
-import org.jboss.resteasy.reactive.server.spi.RuntimeConfigurableServerRestHandler;
-import org.jboss.resteasy.reactive.server.spi.RuntimeConfiguration;
-import org.jboss.resteasy.reactive.server.spi.ServerRestHandler;
+import org.jboss.resteasy.reactive.server.spi.GenericRuntimeConfigurableServerRestHandler;
 
 import io.vertx.core.http.Cookie;
 import io.vertx.core.http.impl.CookieImpl;
 import io.vertx.core.http.impl.ServerCookie;
 import io.vertx.ext.web.RoutingContext;
 
-public class CsrfHandler implements ServerRestHandler, RuntimeConfigurableServerRestHandler {
+public class CsrfHandler implements GenericRuntimeConfigurableServerRestHandler<CsrfReactiveConfig> {
     private static final Logger LOG = Logger.getLogger(CsrfHandler.class);
 
     /**
@@ -39,6 +36,11 @@ public class CsrfHandler implements ServerRestHandler, RuntimeConfigurableServer
     CsrfReactiveConfig config;
 
     public CsrfHandler() {
+    }
+
+    @Override
+    public Class<CsrfReactiveConfig> getConfigurationClass() {
+        return CsrfReactiveConfig.class;
     }
 
     /**
@@ -163,7 +165,7 @@ public class CsrfHandler implements ServerRestHandler, RuntimeConfigurableServer
      * @throws IllegalStateException if the {@link RoutingContext} does not have a value for the key {@value #CSRF_TOKEN_KEY}
      *         and a cookie needs to be set.
      */
-    @ServerResponseFilter
+    //    @ServerResponseFilter
     public void filter(ContainerRequestContext requestContext,
             ContainerResponseContext responseContext, RoutingContext routing) {
         if (requestContext.getMethod().equals("GET") && isCsrfTokenRequired(routing, config)
@@ -237,14 +239,9 @@ public class CsrfHandler implements ServerRestHandler, RuntimeConfigurableServer
         }
     }
 
+    @Override
     public void configure(CsrfReactiveConfig configuration) {
         this.config = configuration;
-    }
-
-    @Override
-    public void configure(RuntimeConfiguration configuration) {
-        // TODO Auto-generated method stub
-
     }
 
 }
