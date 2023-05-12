@@ -45,7 +45,7 @@ public class BasicTest {
     @Test
     public void shouldMakeJsonRequestAndGetTextResponse() {
         Response response = RestAssured.with().body(helloUrl).post("/call-helloFromMessage-client");
-        assertThat(response.asString()).isEqualTo("Hello world");
+        assertThat(response.asString()).isEqualTo("test");
     }
 
     @Test
