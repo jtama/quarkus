@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Handler;
 import java.util.stream.Collectors;
@@ -25,6 +26,7 @@ import org.jboss.jandex.IndexView;
 import org.jboss.jandex.MethodInfo;
 import org.jboss.jandex.Type;
 import org.jboss.logging.Logger;
+import org.objectweb.asm.ClassVisitor;
 
 import io.quarkus.bootstrap.logging.InitialConfigurator;
 import io.quarkus.bootstrap.logging.QuarkusDelayedHandler;
@@ -40,6 +42,7 @@ import io.quarkus.deployment.builditem.ApplicationClassNameBuildItem;
 import io.quarkus.deployment.builditem.ApplicationInfoBuildItem;
 import io.quarkus.deployment.builditem.BytecodeRecorderConstantDefinitionBuildItem;
 import io.quarkus.deployment.builditem.BytecodeRecorderObjectLoaderBuildItem;
+import io.quarkus.deployment.builditem.BytecodeTransformerBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.GeneratedClassBuildItem;
@@ -65,6 +68,7 @@ import io.quarkus.dev.console.QuarkusConsole;
 import io.quarkus.gizmo.BytecodeCreator;
 import io.quarkus.gizmo.CatchBlockCreator;
 import io.quarkus.gizmo.ClassCreator;
+import io.quarkus.gizmo.ClassTransformer;
 import io.quarkus.gizmo.FieldCreator;
 import io.quarkus.gizmo.FieldDescriptor;
 import io.quarkus.gizmo.MethodCreator;
@@ -106,6 +110,7 @@ public class MainClassBuildStep {
             void.class);
     private static final DotName QUARKUS_APPLICATION = DotName.createSimple(QuarkusApplication.class.getName());
     private static final DotName OBJECT = DotName.createSimple(Object.class.getName());
+    private static final Type STRING_ARRAY = Type.create(DotName.createSimple(String[].class.getName()), Type.Kind.ARRAY);
 
     @BuildStep
     void build(List<StaticBytecodeRecorderBuildItem> staticInitTasks,
@@ -143,14 +148,14 @@ public class MainClassBuildStep {
         scField.setModifiers(Modifier.PUBLIC | Modifier.STATIC);
 
         MethodCreator ctor = file.getMethodCreator("<init>", void.class);
-        ctor.invokeSpecialMethod(MethodDescriptor.ofMethod(Application.class, "<init>", void.class, boolean.class),
+        ctor.invokeSpecialMethod(ofMethod(Application.class, "<init>", void.class, boolean.class),
                 ctor.getThis(), ctor.load(launchMode.isAuxiliaryApplication()));
         ctor.returnValue(null);
 
         MethodCreator mv = file.getMethodCreator("<clinit>", void.class);
         mv.setModifiers(Modifier.PUBLIC | Modifier.STATIC);
         if (!namingConfig.enableJndi && allowJNDIBuildItems.isEmpty()) {
-            mv.invokeStaticMethod(MethodDescriptor.ofMethod(DisabledInitialContextManager.class, "register", void.class));
+            mv.invokeStaticMethod(ofMethod(DisabledInitialContextManager.class, "register", void.class));
         }
 
         //very first thing is to set system props (for build time)
@@ -161,12 +166,12 @@ public class MainClassBuildStep {
         //set the launch mode
         ResultHandle lm = mv
                 .readStaticField(FieldDescriptor.of(LaunchMode.class, launchMode.getLaunchMode().name(), LaunchMode.class));
-        mv.invokeStaticMethod(MethodDescriptor.ofMethod(ProfileManager.class, "setLaunchMode", void.class, LaunchMode.class),
+        mv.invokeStaticMethod(ofMethod(ProfileManager.class, "setLaunchMode", void.class, LaunchMode.class),
                 lm);
 
         mv.invokeStaticMethod(CONFIGURE_STEP_TIME_ENABLED);
 
-        mv.invokeStaticMethod(MethodDescriptor.ofMethod(Timing.class, "staticInitStarted", void.class, boolean.class),
+        mv.invokeStaticMethod(ofMethod(Timing.class, "staticInitStarted", void.class, boolean.class),
                 mv.load(launchMode.isAuxiliaryApplication()));
 
         // ensure that the config class is initialized
@@ -248,7 +253,7 @@ public class MainClassBuildStep {
 
         //now set the command line arguments
         mv.invokeVirtualMethod(
-                MethodDescriptor.ofMethod(StartupContext.class, "setCommandLineArguments", void.class, String[].class),
+                ofMethod(StartupContext.class, "setCommandLineArguments", void.class, String[].class),
                 startupContext, mv.getMethodParam(0));
 
         mv.invokeStaticMethod(CONFIGURE_STEP_TIME_ENABLED);
@@ -333,6 +338,7 @@ public class MainClassBuildStep {
 
     @BuildStep
     public MainClassBuildItem mainClassBuildStep(BuildProducer<GeneratedClassBuildItem> generatedClass,
+            BuildProducer<BytecodeTransformerBuildItem> transformedClass,
             ApplicationArchivesBuildItem applicationArchivesBuildItem,
             CombinedIndexBuildItem combinedIndexBuildItem,
             Optional<QuarkusApplicationClassBuildItem> quarkusApplicationClass,
@@ -357,6 +363,7 @@ public class MainClassBuildStep {
             quarkusMainAnnotations.put(name, sanitizeMainClassName(classInfo, index));
         }
 
+        MethodInfo mainClassMethod = null;
         if (packageConfig.mainClass.isPresent()) {
             String mainAnnotationClass = quarkusMainAnnotations.get(packageConfig.mainClass.get());
             if (mainAnnotationClass != null) {
@@ -378,7 +385,7 @@ public class MainClassBuildStep {
 
                 MethodCreator mv = file.getMethodCreator("main", void.class, String[].class);
                 mv.setModifiers(Modifier.PUBLIC | Modifier.STATIC);
-                mv.invokeStaticMethod(MethodDescriptor.ofMethod(Quarkus.class, "run", void.class, String[].class),
+                mv.invokeStaticMethod(ofMethod(Quarkus.class, "run", void.class, String[].class),
                         mv.getMethodParam(0));
                 mv.returnValue(null);
 
@@ -388,10 +395,9 @@ public class MainClassBuildStep {
             Collection<ClassInfo> impls = index
                     .getAllKnownImplementors(QUARKUS_APPLICATION);
             ClassInfo classByName = index.getClassByName(DotName.createSimple(mainClassName));
-            MethodInfo mainClassMethod = null;
             if (classByName != null) {
                 mainClassMethod = classByName
-                        .method("main", Type.create(DotName.createSimple(String[].class.getName()), Type.Kind.ARRAY));
+                        .method("main", STRING_ARRAY);
             }
             if (mainClassMethod == null) {
                 boolean found = false;
@@ -413,6 +419,10 @@ public class MainClassBuildStep {
                     }
                 }
             }
+        }
+
+        if (!mainClassName.equals(MAIN_CLASS) && ((mainClassMethod == null) || !Modifier.isPublic(mainClassMethod.flags()))) {
+            transformedClass.produce(new BytecodeTransformerBuildItem(mainClassName, new MainMethodTransformer(index)));
         }
 
         return new MainClassBuildItem(mainClassName);
@@ -443,7 +453,7 @@ public class MainClassBuildStep {
 
         MethodCreator mv = file.getMethodCreator("main", void.class, String[].class);
         mv.setModifiers(Modifier.PUBLIC | Modifier.STATIC);
-        mv.invokeStaticMethod(MethodDescriptor.ofMethod(Quarkus.class, "run", void.class, Class.class, String[].class),
+        mv.invokeStaticMethod(ofMethod(Quarkus.class, "run", void.class, Class.class, String[].class),
                 mv.loadClassFromTCCL(quarkusApplicationClassName),
                 mv.getMethodParam(0));
         mv.returnValue(null);
@@ -492,6 +502,100 @@ public class MainClassBuildStep {
     @BuildStep
     ReflectiveClassBuildItem applicationReflection() {
         return ReflectiveClassBuildItem.builder(Application.APP_CLASS_NAME).build();
+    }
+
+    private static class MainMethodTransformer implements BiFunction<String, ClassVisitor, ClassVisitor> {
+
+        private final IndexView index;
+
+        public MainMethodTransformer(IndexView index) {
+            this.index = index;
+        }
+
+        @Override
+        public ClassVisitor apply(String mainClassName, ClassVisitor outputClassVisitor) {
+            ClassInfo classByName = index.getClassByName(mainClassName);
+            if (classByName == null) {
+                throw new IllegalStateException("mainClassName should have a corresponding ClassInfo at this point");
+            }
+            ClassTransformer transformer = new ClassTransformer(mainClassName);
+
+            MethodInfo withStringArgs = classByName.method("main", STRING_ARRAY);
+            StringArgsPassState state = StringArgsPassState.NO_METHOD;
+
+            if (withStringArgs != null) {
+                short modifiers = withStringArgs.flags();
+                if (Modifier.isStatic(modifiers)) {
+                    if (Modifier.isPublic(modifiers)) {
+                        // nothing to do
+                        state = StringArgsPassState.EXIT;
+                    } else {
+                        // this is the simplest case where we just make the method public
+                        transformer.modifyMethod(MethodDescriptor.of(withStringArgs)).addModifiers(Modifier.PUBLIC);
+                        state = StringArgsPassState.NO_MORE_ACTIONS_NEEDED;
+                    }
+                } else {
+                    if (Modifier.isPrivate(modifiers)) {
+                        state = StringArgsPassState.HAS_PRIVATE_MAIN;
+                    } else {
+                        // here we need to construct an instance and call the instance method with the args parameter
+                        MethodCreator standardMain = createStandardMain(transformer);
+                        ResultHandle instanceHandle = standardMain.newInstance(ofConstructor(mainClassName));
+                        standardMain.invokeVirtualMethod(ofMethod(mainClassName, "$$main$$", void.class, String[].class),
+                                instanceHandle, standardMain.getMethodParam(0));
+                        standardMain.returnValue(null);
+                        transformer.modifyMethod(MethodDescriptor.of(withStringArgs)).rename("$$main$$");
+                        state = StringArgsPassState.NO_MORE_ACTIONS_NEEDED;
+                    }
+                }
+            }
+
+            if (state == StringArgsPassState.EXIT) {
+                return outputClassVisitor;
+            } else if (state == StringArgsPassState.NO_MORE_ACTIONS_NEEDED) {
+                return transformer.applyTo(outputClassVisitor);
+            }
+
+            MethodInfo withoutArgs = classByName.method("main");
+            if (withoutArgs == null) {
+                if (state == StringArgsPassState.HAS_PRIVATE_MAIN) {
+                    throw new IllegalStateException("Main method on class '" + mainClassName + "' cannot be private");
+                } else {
+                    throw new IllegalStateException("Unable to find main method on class '" + mainClassName + "'");
+                }
+            } else {
+                short modifiers = withoutArgs.flags();
+                if (Modifier.isPrivate(modifiers)) {
+                    throw new IllegalStateException("Main method on class '" + mainClassName + "' cannot be private");
+                } else {
+                    MethodCreator standardMain = createStandardMain(transformer);
+                    if (Modifier.isStatic(modifiers)) {
+                        // call the static main without any parameters
+                        standardMain.invokeStaticMethod(MethodDescriptor.of(withoutArgs));
+                    } else {
+                        // here we need to construct an instance and call the instance method without any parameters
+                        ResultHandle instanceHandle = standardMain.newInstance(ofConstructor(mainClassName));
+                        standardMain.invokeVirtualMethod(MethodDescriptor.of(withoutArgs), instanceHandle);
+                    }
+                    standardMain.returnValue(null);
+                }
+            }
+
+            return transformer.applyTo(outputClassVisitor);
+        }
+
+        private static MethodCreator createStandardMain(ClassTransformer transformer) {
+            return transformer.addMethod("main", void.class, String[].class)
+                    .setModifiers(Modifier.PUBLIC | Modifier.STATIC);
+        }
+
+        enum StringArgsPassState {
+            NO_METHOD,
+            EXIT,
+            NO_MORE_ACTIONS_NEEDED,
+            HAS_PRIVATE_MAIN,
+            REQUIRES_RENAME
+        }
     }
 
 }
