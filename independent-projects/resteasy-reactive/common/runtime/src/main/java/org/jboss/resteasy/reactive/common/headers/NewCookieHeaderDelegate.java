@@ -61,7 +61,7 @@ public class NewCookieHeaderDelegate implements RuntimeDelegate.HeaderDelegate {
             } else if (name.equalsIgnoreCase("HttpOnly")) {
                 httpOnly = true;
             } else if (name.equalsIgnoreCase("SameSite")) {
-                sameSite = NewCookie.SameSite.valueOf(value.toUpperCase());
+                sameSite = NewCookie.SameSite.valueOf(value.toUpperCase(Locale.ROOT));
             } else if (name.equalsIgnoreCase("Expires")) {
                 try {
                     expiry = new SimpleDateFormat(OLD_COOKIE_PATTERN, Locale.US).parse(value);
@@ -138,10 +138,23 @@ public class NewCookieHeaderDelegate implements RuntimeDelegate.HeaderDelegate {
             b.append(";Secure");
         if (cookie.isHttpOnly())
             b.append(";HttpOnly");
+
         if (cookie.getSameSite() != null) {
             b.append(";SameSite=");
-            b.append(cookie.getSameSite());
+            appendCorrectCase(b, cookie.getSameSite());
         }
         return b.toString();
+    }
+
+    private static void appendCorrectCase(final StringBuilder sb, final Enum<?> e) {
+        boolean first = true;
+        for (char c : e.name().toCharArray()) {
+            if (first) {
+                sb.append(c);
+                first = false;
+            } else {
+                sb.append(Character.toLowerCase(c));
+            }
+        }
     }
 }
