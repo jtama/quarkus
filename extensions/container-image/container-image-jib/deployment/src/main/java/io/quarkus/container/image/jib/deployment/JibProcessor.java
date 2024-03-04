@@ -50,6 +50,7 @@ import com.google.cloud.tools.jib.api.buildplan.FileEntriesLayer;
 import com.google.cloud.tools.jib.api.buildplan.FileEntry;
 import com.google.cloud.tools.jib.api.buildplan.FilePermissions;
 import com.google.cloud.tools.jib.api.buildplan.FilePermissionsProvider;
+import com.google.cloud.tools.jib.api.buildplan.ModificationTimeProvider;
 import com.google.cloud.tools.jib.api.buildplan.OwnershipProvider;
 import com.google.cloud.tools.jib.api.buildplan.Port;
 import com.google.cloud.tools.jib.frontend.CredentialRetrieverFactory;
@@ -529,7 +530,7 @@ public class JibProcessor {
 
         try {
             Instant now = Instant.now();
-            Instant modificationTime = jibConfig.useCurrentTimestampFileModification ? now : Instant.EPOCH;
+            Instant modificationTime = jibConfig.useCurrentTimestampFileModification ? now : Instant.ofEpochSecond(1);
 
             JibContainerBuilder jibContainerBuilder = toJibContainerBuilder(baseJvmImage, jibConfig);
             if (fastChangingLibPaths.isEmpty()) {
@@ -665,21 +666,53 @@ public class JibProcessor {
                 && baseJvmImage.contains(RUNTIME_SUFFIX);
     }
 
-    public JibContainerBuilder addLayer(JibContainerBuilder jibContainerBuilder, List<Path> files,
+    private void addLayer(JibContainerBuilder jibContainerBuilder, List<Path> files,
             AbsoluteUnixPath pathInContainer, String name, boolean isMutableJar,
-            Instant now)
+            Instant modificationTime)
             throws IOException {
         FileEntriesLayer.Builder layerConfigurationBuilder = FileEntriesLayer.builder().setName(name);
 
-        for (Path file : files) {
-            layerConfigurationBuilder.addEntryRecursive(
-                    file, pathInContainer.resolve(file.getFileName()),
+        var paths = new ArrayList<>(files);
+        Collections.sort(paths);
+        for (Path file : paths) {
+            addEntryRecursive(layerConfigurationBuilder, file, pathInContainer.resolve(file.getFileName()),
                     isMutableJar ? REMOTE_DEV_FOLDER_PERMISSIONS_PROVIDER : DEFAULT_FILE_PERMISSIONS_PROVIDER,
-                    (sourcePath, destinationPath) -> now,
+                    (sourcePath, destinationPath) -> modificationTime,
                     isMutableJar ? REMOTE_DEV_OWNERSHIP_PROVIDER : DEFAULT_OWNERSHIP_PROVIDER);
         }
 
-        return jibContainerBuilder.addFileEntriesLayer(layerConfigurationBuilder.build());
+        jibContainerBuilder.addFileEntriesLayer(layerConfigurationBuilder.build());
+    }
+
+    /**
+     * This is a copy of
+     * {@link FileEntriesLayer.Builder#addEntryRecursive(Path, AbsoluteUnixPath, FilePermissionsProvider, ModificationTimeProvider)}
+     * that always adds the files in the same order
+     */
+    private void addEntryRecursive(FileEntriesLayer.Builder layerConfigurationBuilder, Path sourceFile,
+            AbsoluteUnixPath pathInContainer,
+            FilePermissionsProvider filePermissionProvider,
+            ModificationTimeProvider modificationTimeProvider,
+            OwnershipProvider ownershipProvider) throws IOException {
+        FilePermissions permissions = filePermissionProvider.get(sourceFile, pathInContainer);
+        Instant modificationTime = modificationTimeProvider.get(sourceFile, pathInContainer);
+        String ownership = ownershipProvider.get(sourceFile, pathInContainer);
+        layerConfigurationBuilder.addEntry(sourceFile, pathInContainer, permissions, modificationTime, ownership);
+        if (!Files.isDirectory(sourceFile)) {
+            return;
+        }
+        try (Stream<Path> files = Files.list(sourceFile).sorted()) {
+            List<Path> collect = files.toList();
+            for (Path file : collect) {
+                addEntryRecursive(
+                        layerConfigurationBuilder,
+                        file,
+                        pathInContainer.resolve(file.getFileName()),
+                        filePermissionProvider,
+                        modificationTimeProvider,
+                        ownershipProvider);
+            }
+        }
     }
 
     private void mayInheritEntrypoint(JibContainerBuilder jibContainerBuilder, List<String> entrypoint,
